@@ -1,0 +1,12 @@
+table:
+  out-type: json
+  sheet: 敵
+  row: 3
+  model: simple.simple
+  columns:
+
+    - name: name
+      column: 名前
+      type: char
+
+
