@@ -8,13 +8,32 @@ import os.path
 import datetime
 import simplejson as json
 
+def to_colx(colname):
+    a2z = 'ABCDEFGHIJLKMNOPQRSTUVWXYZ'
+    total = 0
+    mult = 0
+    for char in colname:
+        total += (a2z.find(char) + (26 * mult))
+    mult += 1
+    return total
+
 class SettingColumn(object):
 
-    def __init__(self, name, type, default):
-        self.name = name
-        self.type = type
-        self.default = default
-        pass
+    def __init__(self, yaml, column):
+        self.yaml = yaml
+        self.column = column
+        self.name = column['name']
+        self.type = column['type']
+        self.default = column['default'] if 'default' in column else None
+
+    def has_relation(self):
+        return 'relation' in self.column
+
+    def relation(self, value):
+        try:
+            return self.yaml.relation_maps[self.column['relation']][value]
+        except KeyError:
+            print u'%sには%sに対応する値がない' % (self.column['relation'], value)
 
 class SettingsYaml(object):
 
@@ -22,7 +41,6 @@ class SettingsYaml(object):
 
         self.yaml = yaml
         columns = yaml['table']['columns']
-        #print columns
         # カラム毎の設定を作っておく
         self.columns = {}
         self.columns['ID'] = {'name':'id', 'column': u'ID', 'type': 'int'}
@@ -34,6 +52,40 @@ class SettingsYaml(object):
                 print >>sys.stderr, u'name: %sにcolumn要素が足りない' % (column['name'])
                 raise
         self.model = yaml['table']['model']
+
+        # 全体設定の処理
+        if 'relation-defines' in yaml['table']:
+            # リレーションを処理するべきなら
+            # [{リレーション名:[シート名, キー, バリュー]}]
+            #print yaml['table']['relation-names']
+            pass
+        self.relation_maps = {}
+
+    def create_setting_column(self, column):
+        return SettingColumn(self, column)
+
+    def pre_process(self, sheet):
+        # 前処理（全体設定で必要な処理を前もって行う）
+        yaml = self.yaml
+        if 'relation-maps' in yaml['table']:
+            relation_maps = yaml['table']['relation-maps']
+            for relation_map in relation_maps:
+                relation_name, sheet_name, key_column, value_column = relation_map
+                if sheet.name == sheet_name:
+                    # ID からリレーションマップを作成する
+                    key_column_index = to_colx(key_column)
+                    value_column_index = to_colx(value_column)
+                    map = {}
+                    for row in range(sheet.nrows):
+                        key = sheet.cell(row, key_column_index).value
+                        if key != '':
+                            value = sheet.cell(row, value_column_index).value
+                            #print u'%s:%s' % (key, value)
+                            try:
+                                map[key] = int(value)
+                            except ValueError:
+                                pass
+                    self.relation_maps[relation_name] = map
 
     def is_convert_sheet(self, sheet):
         if self.yaml['table']['sheet'] == sheet.name:
@@ -56,11 +108,9 @@ class SettingsYaml(object):
                 if column in self.columns:
                     #print column
                     xls_column_set.add(column)
-                    default = self.columns[column]['default'] if 'default' in self.columns[column] else None
-                    self.setting_columns[col] = SettingColumn(
-                        name=self.columns[column]['name'],
-                        type=self.columns[column]['type'],
-                        default=default,
+
+                    self.setting_columns[col] = self.create_setting_column(
+                        self.columns[column]
                     )
             # 存在しないカラム
             none_exist_columns = list(yaml_column_set - xls_column_set)
@@ -69,11 +119,10 @@ class SettingsYaml(object):
                 column = none_exist_column
                 try:
                     default = self.columns[column]['default']
+
                     self.settings_none_exist_columns.append(
-                        SettingColumn(
-                            name=self.columns[column]['name'],
-                            type=self.columns[column]['type'],
-                            default=default,
+                        self.create_setting_column(
+                            self.columns[column]
                             )
                         )
                 except KeyError:
@@ -142,6 +191,7 @@ def xls2fix(s, settings, output_filename):
                                 value = column_dict[col]
                             except KeyError:
                                 print >>sys.stderr, u'%s:%sはintでなくdictを使っても変換できない' % (cellnameabs(row, column), col)
+                                raise
                         else:
                             print >>sys.stderr, u'%s:%sはintに変換できない' % (cellnameabs(column, row), col)
                             raise
@@ -152,10 +202,18 @@ def xls2fix(s, settings, output_filename):
                     except ValueError:
                         value = 0.0
                 elif setting_column.type == 'foreign_key':
-                    try:
-                        value = int(col)
-                    except ValueError:
-                        value = None
+                    if col == u'':
+                        value = 0
+                    else:
+                        try:
+                            value = int(col)
+                        except ValueError:
+                            # リレーション設定があるか？
+                            if setting_column.has_relation():
+                                value = setting_column.relation(col)
+                            else:
+                                print >>sys.stderr, u'%s:%sはリレーションIDに変換できない' % (cellnameabs(row, column), col)
+                                raise
                     if value == 0:
                         value = None
                 elif setting_column.type == 'boolean':
@@ -225,6 +283,12 @@ def main():
             output_filename = root + '.yaml'
 
     wb = open_workbook(input_filename)
+
+    # 前処理
+    for s in wb.sheets():
+        settings.pre_process(s)
+
+    # 実コンバート
     print u'Convert... %s' % (input_filename)
     for s in wb.sheets():
         if settings.is_convert_sheet(s):
