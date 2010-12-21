@@ -1,0 +1,65 @@
+.. xls2fix documentation master file, created by
+   sphinx-quickstart on Tue Dec 21 10:24:32 2010.
+   You can adapt this file completely to your liking, but it should at least
+   contain the root `toctree` directive.
+
+Welcome to xls2fix's documentation!
+===================================
+
+Contents:
+
+.. toctree::
+   :maxdepth: 2
+
+Indices and tables
+==================
+
+* :ref:`genindex`
+* :ref:`modindex`
+* :ref:`search`
+
+はじめに
+==========
+xls2fixはExcel（*.xls）からDjango用のfixtureを生成する為のツールです。
+
+使い方
+==========
+殆どの設定はyamlファイルによって行います。
+
+これらの記法は現在開発中であり変更される可能性があります。
+
+python xls2fix.py Data.xls -y data.yml -o data.json
+
+基本的な使い方は以上です。
+
+YAMLの記法
+==========
+
+コンバートするシートに対応したYAMLファイルを用意する必要があります。::
+
+  table:
+    out-type: json   # 出力を指定json/yaml
+    sheet: シート名   # Excelのシート名です
+    row: 3           # 定義行（以下ののカラムを解析する）
+    model: data.data # fixtureに出力されるモデル名
+    import: outer.yml # 外部定義yamlファイルがあれば読み込み
+    relation-maps:    # 外部参照キーのID列を指定するために設定します
+      - [シート名, リレーション名, A, B] # 外部キーがIDと認識する「キーとバリュー」を指定します。シート名とリレーション名、キーのカラム名、バリューのカラム名を指定します。
+    columns:          # 以下カラム定義
+
+      - name: django_field_name # Djangoのフィールド名
+        column: excel_column_name # Excelのカラム名
+        type: int # 型（int、float、char、foreign_key）
+        relation: relation-mapsのリレーション名 # 外部参照キーの名前とIDに対応したリレーション名を指定します。
+
+    # 以下カラム定義を繰り返し
+
+importに指定する外部YAMLはdictを記述することができます。個々のカラムのnameに一致します。
+outer.ymlの例::
+
+  rarity:
+    コモン: 1
+    アンコモン: 2
+    レア: 3
+
+
